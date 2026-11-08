@@ -28,6 +28,14 @@ As they record losses, the app updates their current position on the map.
   - *By road*: a driving route from the public OSRM service. If no route is found, the app falls back to a straight line.
   - Show distances in miles or kilometres.
 - **Progress log**: add dated entries with an optional note. Use negative amounts for setbacks, and delete entries you no longer want.
+- **Estimated finish date**: a forecast based on your average rate so far. It is recalculated every time
+  you log, edit or delete progress:
+  - **Rate**: worked out from the goal's **start date** to your latest entry. If there's no start date, it runs
+    from your first entry to your latest one, and the first day's progress counts as the starting point.
+  - **Example**: 15 lbs lost in 5 weeks is 3 lbs a week, so the remaining 15 lbs take 5 more weeks.
+  - **Finish-by date (optional)**: the app says whether you're ahead or behind, and the weekly rate you need to finish by then.
+  - **Goal reached**: the app shows the date you reached it and how long it took.
+  - **No estimate yet**: the app explains why, for example when you need entries on more than one day or progress is flat.
 - **Map position**: the 🏃 marker moves along the route in proportion to your progress. The part of the route you've covered is drawn solid. The panel shows the distance travelled and remaining, and the place you're currently near.
 - Everything is saved in your browser's `localStorage`. There is no account or server.
 
@@ -52,7 +60,8 @@ npm test
 ```
 
 The tests cover the distance and progress maths in `js/geo.js`, including the 100-mile / 15-of-30lbs example above.
-They also cover parsing, conversion and formatting of amounts in `js/units.js`, such as `£3.52`, `52p` and `2st 5lb`.
+They also cover parsing, conversion and formatting of amounts in `js/units.js`, such as `£3.52`, `52p` and `2st 5lb`,
+and the finish-date forecasting in `js/forecast.js`.
 
 ## Project layout
 
@@ -61,6 +70,7 @@ index.html        UI
 css/style.css     styles
 js/geo.js         pure geometry/progress maths (browser + Node)
 js/units.js       unit definitions, amount parsing, conversion, formatting
+js/forecast.js    estimated finish date from the average rate to date
 js/app.js         map, UI, geocoding, routing, persistence
 vendor/leaflet/   Leaflet map library (BSD-2-Clause)
 test/             Node unit tests

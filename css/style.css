@@ -247,3 +247,19 @@ code {
 }
 .entries .conv { color: var(--muted); font-weight: 400; font-size: 0.78rem; display: block; }
 .entries li.incompatible { opacity: 0.55; }
+
+/* Estimated finish */
+.forecast {
+  background: #f1f6ff;
+  border: 1px solid #cfe0ff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+.forecast .eta { font-size: 1rem; font-weight: 700; }
+.forecast .basis { color: var(--muted); font-size: 0.8rem; }
+.forecast .ahead { color: var(--start); font-weight: 600; }
+.forecast .behind { color: #b26a00; font-weight: 600; }
+.forecast.done { background: #ecf8f0; border-color: #b6e3c6; }
