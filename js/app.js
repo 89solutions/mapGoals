@@ -24,6 +24,8 @@
     routeKey: null, // identifies which start/end/mode routePath belongs to
     distUnit: 'mi',
     traveller: 'auto', // 'auto' | 'runner' | 'cyclist' | 'car' | 'bird' | 'plane'
+    started: false, // false: setting up the goal and route; true: journey under way (setup locked)
+    editBackup: null, // while editing a started journey: the settings to restore on Cancel
     entries: [], // { id, date, amount, unit, note } – amount is in the entry's own unit
   });
 
@@ -32,7 +34,10 @@
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return migrate(Object.assign(defaultState(), JSON.parse(raw)));
+      if (raw) {
+        const saved = JSON.parse(raw);
+        return migrate(Object.assign(defaultState(), saved), saved);
+      }
     } catch (e) {
       console.warn('Could not load saved data', e);
     }
@@ -40,7 +45,7 @@
   }
 
   /** Upgrade data saved before units were structured (free-text unit, unit-less entries). */
-  function migrate(s) {
+  function migrate(s, saved = {}) {
     s.goal = Object.assign(defaultState().goal, { startDate: '' }, s.goal);
     if (!Units.UNITS[s.goal.unit]) {
       const id = Units.unitIdFromText(s.goal.unit);
@@ -51,6 +56,10 @@
       }
     }
     if (!s.goal.targetText && s.goal.target != null) s.goal.targetText = String(s.goal.target);
+    // Data from before setup/journey modes: treat a fully set-up goal with progress as started.
+    if (typeof saved.started !== 'boolean') {
+      s.started = !!(s.start && s.end && s.goal.target > 0 && s.entries && s.entries.length);
+    }
     s.entries = (s.entries || []).map((e) => (e.unit ? e : Object.assign({}, e, { unit: s.goal.unit })));
     return s;
   }
@@ -109,6 +118,18 @@
     entryUnit: $('#entry-unit'),
     entryError: $('#entry-error'),
     ratesNote: $('#rates-note'),
+    setupView: $('#setup-view'),
+    journeyView: $('#journey-view'),
+    startBtn: $('#start-btn'),
+    cancelEditBtn: $('#cancel-edit-btn'),
+    editBtn: $('#edit-btn'),
+    startHeading: $('#start-heading'),
+    startHint: $('#start-hint'),
+    startChecklist: $('#start-checklist'),
+    journeyTitle: $('#journey-title'),
+    journeyFacts: $('#journey-facts'),
+    historyCount: $('#history-count'),
+    historyEmpty: $('#history-empty'),
     traveller: $('#traveller'),
     travellerHint: $('#traveller-hint'),
     startDate: $('#goal-start-date'),
@@ -209,6 +230,7 @@
   let pickMode = null; // 'start' | 'end' | null
 
   map.on('click', (ev) => {
+    if (!inSetup()) return; // the route is locked once the journey has started
     let which = pickMode;
     if (!which) {
       if (!state.start) which = 'start';
@@ -257,6 +279,7 @@
           state[which].label = name;
           save();
           renderPoints();
+          renderRouteAndProgress();
         }
       });
     }
@@ -275,11 +298,21 @@
         if (!layers[which]) layers[which] = makeMarker(which);
         layers[which].setLatLng([p.lat, p.lng]);
         layers[which].bindTooltip(p.label || fmtCoord(p));
+        lockMarker(layers[which]);
       } else if (layers[which]) {
         map.removeLayer(layers[which]);
         layers[which] = null;
       }
     }
+  }
+
+  function lockMarker(m) {
+    if (m && m.dragging) inSetup() ? m.dragging.enable() : m.dragging.disable();
+  }
+
+  /** Showing the setup options: before the journey starts, or while editing it. */
+  function inSetup() {
+    return !state.started || !!state.editBackup;
   }
 
   // ---------------------------------------------------------------- route ---
@@ -413,6 +446,112 @@
     renderSummary({ achieved, target, fraction, totalDist, unitName, skipped, hasRoute: !!path });
     renderForecast(forecast);
     renderEntries();
+    renderMode({ target, totalDist, unitName, path });
+  }
+
+  // ---------------------------------------------------------- setup/journey ---
+
+  /** Is everything needed to start the journey in place? */
+  function readiness(target, path) {
+    const items = [
+      { ok: target > 0, text: target > 0 ? `Target: ${fmtGoal(target)}` : 'Set a target amount' },
+      { ok: !!state.start, text: state.start ? `Start: ${placeName(state.start)}` : 'Choose a start point' },
+      { ok: !!state.end, text: state.end ? `Destination: ${placeName(state.end)}` : 'Choose a destination' },
+    ];
+    const routing = state.start && state.end && !path;
+    if (routing) items.push({ ok: false, text: 'Working out the route…' });
+    return { items, ready: items.every((i) => i.ok) };
+  }
+
+  function placeName(p) {
+    return p.label ? p.label.split(',')[0] : fmtCoord(p);
+  }
+
+  /** Show either the setup options or the journey (goal summary, progress and history). */
+  function renderMode({ target, totalDist, unitName, path }) {
+    const setup = inSetup();
+    const editing = !!state.editBackup;
+    el.setupView.hidden = !setup;
+    el.journeyView.hidden = setup;
+    lockMarker(layers.start);
+    lockMarker(layers.end);
+
+    if (setup) {
+      const { items, ready } = readiness(target, path);
+      el.startHeading.textContent = editing ? 'Save your changes' : 'Ready?';
+      el.startBtn.textContent = editing ? '💾 Save changes' : '🚀 Start my journey';
+      el.cancelEditBtn.hidden = !editing;
+      el.startHint.textContent = editing
+        ? `Your progress history (${state.entries.length} entr${state.entries.length === 1 ? 'y' : 'ies'}) is kept. Entries are converted to the goal's unit where possible.`
+        : 'Once you start, the goal and route are locked in and this panel shows your progress instead. You can still change them later with “Edit goal”.';
+      el.startChecklist.textContent = '';
+      for (const item of items) {
+        const li = document.createElement('li');
+        li.className = item.ok ? 'ok' : '';
+        li.textContent = `${item.ok ? '✅' : '⬜'} ${item.text}`;
+        el.startChecklist.appendChild(li);
+      }
+      el.startBtn.disabled = !ready;
+      return;
+    }
+
+    el.journeyTitle.textContent = state.goal.title || `Reach ${fmtGoal(target)}`;
+    const kind = path ? Geo.pickTraveller(state.routeMode, Geo.pathLengthKm(path), state.traveller) : null;
+    const facts = [
+      ['Goal', target > 0 ? fmtGoal(target) : '–'],
+      ['From', state.start ? state.start.label || fmtCoord(state.start) : '–'],
+      ['To', state.end ? state.end.label || fmtCoord(state.end) : '–'],
+      ['Distance', path ? `${fmtNum(totalDist)} ${unitName} ${state.routeMode === 'road' ? 'by road' : 'as the crow flies'}` : '–'],
+      ['Travelling as', kind ? `${TRAVELLERS[kind].emoji} ${TRAVELLERS[kind].name}` : '–'],
+    ];
+    if (state.goal.startDate) facts.push(['Started', formatDate(state.goal.startDate)]);
+    if (state.goal.targetDate) facts.push(['Finish by', formatDate(state.goal.targetDate)]);
+    el.journeyFacts.textContent = '';
+    for (const [k, v] of facts) {
+      const dt = document.createElement('dt');
+      dt.textContent = k;
+      const dd = document.createElement('dd');
+      dd.textContent = v;
+      el.journeyFacts.append(dt, dd);
+    }
+  }
+
+  const EDITABLE = ['goal', 'start', 'end', 'routeMode', 'routePath', 'routeKey', 'distUnit', 'traveller'];
+
+  /** Reopen the setup options for a started journey, keeping the history. */
+  function editJourney() {
+    const backup = {};
+    for (const k of EDITABLE) backup[k] = JSON.parse(JSON.stringify(state[k]));
+    state.editBackup = backup;
+    save();
+    syncSetupInputs();
+    renderRouteAndProgress();
+    el.setupView.scrollIntoView({ block: 'start' });
+  }
+
+  /** Throw away edits and go back to the journey as it was. */
+  function cancelEdit() {
+    if (!state.editBackup) return;
+    Object.assign(state, JSON.parse(JSON.stringify(state.editBackup)));
+    state.editBackup = null;
+    save();
+    syncSetupInputs();
+    renderPoints();
+    updateRoute({ fit: true });
+  }
+
+  function startJourney() {
+    const target = Number(state.goal.target);
+    if (!readiness(target, state.routePath).ready) return;
+    state.started = true;
+    state.editBackup = null;
+    save();
+    setPickMode(null);
+    document.querySelectorAll('.search-results').forEach((l) => (l.textContent = ''));
+    renderRouteAndProgress();
+    if (state.routePath) map.fitBounds(L.latLngBounds(state.routePath), { padding: [40, 40], maxZoom: 12 });
+    el.journeyView.scrollIntoView({ block: 'start' });
+    el.entryAmount.focus({ preventScroll: true });
   }
 
   // ------------------------------------------------------------- forecast ---
@@ -614,6 +753,9 @@
 
   function renderEntries() {
     el.entries.textContent = '';
+    const n = state.entries.length;
+    el.historyCount.textContent = n ? `(${n} entr${n === 1 ? 'y' : 'ies'})` : '';
+    el.historyEmpty.hidden = n > 0;
     const goalUnit = state.goal.unit;
     const custom = state.goal.customUnit;
     const sorted = [...state.entries].sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.id - a.id);
@@ -805,11 +947,24 @@
     renderRouteAndProgress();
   }
 
-  function bindGoalInputs() {
+  /** Put the saved goal/route settings into the setup form. */
+  function syncSetupInputs() {
     fillUnitSelect(el.unit, Object.keys(Units.UNITS), state.goal.unit);
     el.title.value = state.goal.title || '';
     el.startDate.value = state.goal.startDate || '';
     el.targetDate.value = state.goal.targetDate || '';
+    el.target.value = state.goal.targetText || '';
+    el.customUnit.value = state.goal.customUnit || '';
+    el.routeMode.value = state.routeMode;
+    el.distUnit.value = state.distUnit;
+    el.traveller.value = state.traveller;
+    showError(el.targetError, '');
+    el.routeNotice.hidden = true;
+    syncUnitControls();
+  }
+
+  function bindGoalInputs() {
+    syncSetupInputs();
     for (const [input, key] of [[el.startDate, 'startDate'], [el.targetDate, 'targetDate']]) {
       input.addEventListener('change', () => {
         state.goal[key] = input.value;
@@ -817,18 +972,12 @@
         renderRouteAndProgress();
       });
     }
-    el.target.value = state.goal.targetText || '';
-    el.customUnit.value = state.goal.customUnit || '';
-    el.routeMode.value = state.routeMode;
-    el.distUnit.value = state.distUnit;
-    el.traveller.value = state.traveller;
     el.traveller.addEventListener('change', () => {
       state.traveller = el.traveller.value;
       save();
       renderRouteAndProgress();
     });
     el.entryDate.value = today();
-    syncUnitControls();
 
     el.title.addEventListener('input', () => {
       state.goal.title = el.title.value;
@@ -910,8 +1059,12 @@
       if (layers.me) layers.me.openPopup();
     });
 
+    el.startBtn.addEventListener('click', startJourney);
+    el.editBtn.addEventListener('click', editJourney);
+    el.cancelEditBtn.addEventListener('click', cancelEdit);
+
     el.reset.addEventListener('click', () => {
-      if (!confirm('Delete your goal, route and all logged progress?')) return;
+      if (!confirm('Delete your goal, route and all logged progress, and start a new goal?')) return;
       state = defaultState();
       save();
       location.reload();
@@ -930,5 +1083,5 @@
   ensureRates();
 
   // Exposed for debugging / tests.
-  window.MapGoalsApp = { getState: () => state, setPoint };
+  window.MapGoalsApp = { getState: () => state, setPoint, startJourney, editJourney, cancelEdit };
 })();

@@ -15,6 +15,8 @@
         <p>Turn a personal goal into a journey on the map.</p>
       </header>
 
+      <!-- ============ SETUP: shown until the journey is started ============ -->
+      <div id="setup-view">
       <!-- 1. Goal -->
       <section class="card" id="goal-card">
         <h2><span class="step">1</span> Your goal</h2>
@@ -100,9 +102,35 @@
         <div class="notice" id="route-notice" hidden></div>
       </section>
 
-      <!-- 3. Progress -->
+      <!-- 3. Start -->
+      <section class="card start-card">
+        <h2><span class="step">3</span> <span id="start-heading">Ready?</span></h2>
+        <ul class="checklist" id="start-checklist"></ul>
+        <button type="button" class="btn primary block" id="start-btn" disabled>🚀 Start my journey</button>
+        <button type="button" class="btn block" id="cancel-edit-btn" hidden>Cancel – keep things as they were</button>
+        <p class="hint" id="start-hint">Once you start, the goal and route are locked in and this panel shows your progress instead.
+          You can still change them later with <em>Edit goal</em>.</p>
+      </section>
+      </div>
+
+      <!-- ============ JOURNEY: shown once the journey has started ============ -->
+      <div id="journey-view" hidden>
+      <section class="card" id="journey-card">
+        <div class="journey-head">
+          <h2 id="journey-title">Your goal</h2>
+          <button type="button" class="btn small" id="edit-btn" title="Change the goal or route – your history is kept">✏️ Edit goal</button>
+        </div>
+        <dl class="facts" id="journey-facts"></dl>
+
+        <div class="summary" id="summary">
+          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+          <div class="summary-text" id="summary-text"></div>
+        </div>
+        <div class="forecast" id="forecast" hidden></div>
+      </section>
+
       <section class="card" id="progress-card">
-        <h2><span class="step">3</span> Log progress</h2>
+        <h2>Log progress</h2>
         <form id="entry-form" class="entry-form">
           <label><span>Amount</span>
             <input id="entry-amount" type="text" inputmode="decimal" autocomplete="off" required placeholder="e.g. 2.5" />
@@ -121,18 +149,17 @@
         </form>
         <p class="hint">Type amounts how you like, e.g. <code>3.52</code>, <code>£3.52</code>, <code>52p</code>, <code>2st 5lb</code> or <code>1.2kg</code>. Use a negative number for a set-back (e.g. −1 if you put a pound back on).</p>
         <p class="hint" id="rates-note" hidden></p>
-
-        <div class="summary" id="summary">
-          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-          <div class="summary-text" id="summary-text">Set a goal, a route and log some progress.</div>
-        </div>
-        <div class="forecast" id="forecast" hidden></div>
-
-        <ul class="entries" id="entries"></ul>
       </section>
 
+      <section class="card" id="history-card">
+        <h2>History <span class="count" id="history-count"></span></h2>
+        <p class="hint" id="history-empty">Nothing logged yet – add your first progress above.</p>
+        <ul class="entries" id="entries"></ul>
+      </section>
+      </div>
+
       <footer class="panel-footer">
-        <button type="button" class="btn small ghost danger" id="reset-btn">Reset everything</button>
+        <button type="button" class="btn small ghost danger" id="reset-btn">Reset and start a new goal</button>
       </footer>
     </aside>
 
