@@ -15,6 +15,9 @@ As they record losses, the app updates their current position on the map.
   - **Journey**: the options are hidden and the goal and route are locked, so the pins can't be dragged and
     clicking the map does nothing. The panel shows a summary of the goal (target, from, to, distance, traveller,
     dates), the progress bar and estimated finish, the form for logging progress, and the history.
+  - **✏️ Edit goal** reopens the setup options with the pins unlocked, keeping your progress history.
+    **Save changes** returns to the journey, and **Cancel** restores everything exactly as it was,
+    even if the page was reloaded in the middle of an edit.
   - **Reset and start a new goal** (at the bottom) clears everything and returns to setup.
 - **Goal**: a description ("Lose 30lbs in weight"), a target amount and a unit chosen from a dropdown:
   - **Weight**: pounds (lbs), kilograms, stones, grams, ounces

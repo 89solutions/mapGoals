@@ -25,6 +25,7 @@
     distUnit: 'mi',
     traveller: 'auto', // 'auto' | 'runner' | 'cyclist' | 'car' | 'bird' | 'plane'
     started: false, // false: setting up the goal and route; true: journey under way (setup locked)
+    editBackup: null, // while editing a started journey: the settings to restore on Cancel
     entries: [], // { id, date, amount, unit, note } – amount is in the entry's own unit
   });
 
@@ -120,6 +121,10 @@
     setupView: $('#setup-view'),
     journeyView: $('#journey-view'),
     startBtn: $('#start-btn'),
+    cancelEditBtn: $('#cancel-edit-btn'),
+    editBtn: $('#edit-btn'),
+    startHeading: $('#start-heading'),
+    startHint: $('#start-hint'),
     startChecklist: $('#start-checklist'),
     journeyTitle: $('#journey-title'),
     journeyFacts: $('#journey-facts'),
@@ -225,7 +230,7 @@
   let pickMode = null; // 'start' | 'end' | null
 
   map.on('click', (ev) => {
-    if (state.started) return; // the route is locked once the journey has started
+    if (!inSetup()) return; // the route is locked once the journey has started
     let which = pickMode;
     if (!which) {
       if (!state.start) which = 'start';
@@ -302,7 +307,12 @@
   }
 
   function lockMarker(m) {
-    if (m && m.dragging) state.started ? m.dragging.disable() : m.dragging.enable();
+    if (m && m.dragging) inSetup() ? m.dragging.enable() : m.dragging.disable();
+  }
+
+  /** Showing the setup options: before the journey starts, or while editing it. */
+  function inSetup() {
+    return !state.started || !!state.editBackup;
   }
 
   // ---------------------------------------------------------------- route ---
@@ -459,13 +469,21 @@
 
   /** Show either the setup options or the journey (goal summary, progress and history). */
   function renderMode({ target, totalDist, unitName, path }) {
-    el.setupView.hidden = state.started;
-    el.journeyView.hidden = !state.started;
+    const setup = inSetup();
+    const editing = !!state.editBackup;
+    el.setupView.hidden = !setup;
+    el.journeyView.hidden = setup;
     lockMarker(layers.start);
     lockMarker(layers.end);
 
-    if (!state.started) {
+    if (setup) {
       const { items, ready } = readiness(target, path);
+      el.startHeading.textContent = editing ? 'Save your changes' : 'Ready?';
+      el.startBtn.textContent = editing ? '💾 Save changes' : '🚀 Start my journey';
+      el.cancelEditBtn.hidden = !editing;
+      el.startHint.textContent = editing
+        ? `Your progress history (${state.entries.length} entr${state.entries.length === 1 ? 'y' : 'ies'}) is kept. Entries are converted to the goal's unit where possible.`
+        : 'Once you start, the goal and route are locked in and this panel shows your progress instead. You can still change them later with “Edit goal”.';
       el.startChecklist.textContent = '';
       for (const item of items) {
         const li = document.createElement('li');
@@ -498,10 +516,35 @@
     }
   }
 
+  const EDITABLE = ['goal', 'start', 'end', 'routeMode', 'routePath', 'routeKey', 'distUnit', 'traveller'];
+
+  /** Reopen the setup options for a started journey, keeping the history. */
+  function editJourney() {
+    const backup = {};
+    for (const k of EDITABLE) backup[k] = JSON.parse(JSON.stringify(state[k]));
+    state.editBackup = backup;
+    save();
+    syncSetupInputs();
+    renderRouteAndProgress();
+    el.setupView.scrollIntoView({ block: 'start' });
+  }
+
+  /** Throw away edits and go back to the journey as it was. */
+  function cancelEdit() {
+    if (!state.editBackup) return;
+    Object.assign(state, JSON.parse(JSON.stringify(state.editBackup)));
+    state.editBackup = null;
+    save();
+    syncSetupInputs();
+    renderPoints();
+    updateRoute({ fit: true });
+  }
+
   function startJourney() {
     const target = Number(state.goal.target);
     if (!readiness(target, state.routePath).ready) return;
     state.started = true;
+    state.editBackup = null;
     save();
     setPickMode(null);
     document.querySelectorAll('.search-results').forEach((l) => (l.textContent = ''));
@@ -904,11 +947,24 @@
     renderRouteAndProgress();
   }
 
-  function bindGoalInputs() {
+  /** Put the saved goal/route settings into the setup form. */
+  function syncSetupInputs() {
     fillUnitSelect(el.unit, Object.keys(Units.UNITS), state.goal.unit);
     el.title.value = state.goal.title || '';
     el.startDate.value = state.goal.startDate || '';
     el.targetDate.value = state.goal.targetDate || '';
+    el.target.value = state.goal.targetText || '';
+    el.customUnit.value = state.goal.customUnit || '';
+    el.routeMode.value = state.routeMode;
+    el.distUnit.value = state.distUnit;
+    el.traveller.value = state.traveller;
+    showError(el.targetError, '');
+    el.routeNotice.hidden = true;
+    syncUnitControls();
+  }
+
+  function bindGoalInputs() {
+    syncSetupInputs();
     for (const [input, key] of [[el.startDate, 'startDate'], [el.targetDate, 'targetDate']]) {
       input.addEventListener('change', () => {
         state.goal[key] = input.value;
@@ -916,18 +972,12 @@
         renderRouteAndProgress();
       });
     }
-    el.target.value = state.goal.targetText || '';
-    el.customUnit.value = state.goal.customUnit || '';
-    el.routeMode.value = state.routeMode;
-    el.distUnit.value = state.distUnit;
-    el.traveller.value = state.traveller;
     el.traveller.addEventListener('change', () => {
       state.traveller = el.traveller.value;
       save();
       renderRouteAndProgress();
     });
     el.entryDate.value = today();
-    syncUnitControls();
 
     el.title.addEventListener('input', () => {
       state.goal.title = el.title.value;
@@ -1010,6 +1060,8 @@
     });
 
     el.startBtn.addEventListener('click', startJourney);
+    el.editBtn.addEventListener('click', editJourney);
+    el.cancelEditBtn.addEventListener('click', cancelEdit);
 
     el.reset.addEventListener('click', () => {
       if (!confirm('Delete your goal, route and all logged progress, and start a new goal?')) return;
@@ -1031,5 +1083,5 @@
   ensureRates();
 
   // Exposed for debugging / tests.
-  window.MapGoalsApp = { getState: () => state, setPoint, startJourney };
+  window.MapGoalsApp = { getState: () => state, setPoint, startJourney, editJourney, cancelEdit };
 })();

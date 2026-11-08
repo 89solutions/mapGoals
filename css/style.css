@@ -290,3 +290,7 @@ code {
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; word-break: break-word; }
 .count { color: var(--muted); font-weight: 400; font-size: 0.9rem; }
+
+.journey-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.journey-head h2 { margin-bottom: 10px; }
+.journey-head .btn { flex-shrink: 0; }
