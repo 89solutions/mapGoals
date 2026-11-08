@@ -4,6 +4,7 @@
 
   const Geo = window.MapGoalsGeo;
   const Units = window.MapGoalsUnits;
+  const Forecast = window.MapGoalsForecast;
   const STORAGE_KEY = 'mapgoals.v1';
   const RATES_KEY = 'mapgoals.rates';
   const RATES_MAX_AGE_MS = 12 * 60 * 60 * 1000;
@@ -14,7 +15,8 @@
   // ---------------------------------------------------------------- state ---
   const defaultState = () => ({
     // target is a number expressed in `unit`; targetText is what the user typed.
-    goal: { title: '', target: null, targetText: '', unit: 'lb', customUnit: '' },
+    // startDate: when the goal began (used for the average rate); targetDate: optional "finish by".
+    goal: { title: '', target: null, targetText: '', unit: 'lb', customUnit: '', startDate: today(), targetDate: '' },
     start: null, // { lat, lng, label }
     end: null,
     routeMode: 'straight', // 'straight' | 'road'
@@ -38,7 +40,7 @@
 
   /** Upgrade data saved before units were structured (free-text unit, unit-less entries). */
   function migrate(s) {
-    s.goal = Object.assign(defaultState().goal, s.goal);
+    s.goal = Object.assign(defaultState().goal, { startDate: '' }, s.goal);
     if (!Units.UNITS[s.goal.unit]) {
       const id = Units.unitIdFromText(s.goal.unit);
       if (id) s.goal.unit = id;
@@ -106,6 +108,9 @@
     entryUnit: $('#entry-unit'),
     entryError: $('#entry-error'),
     ratesNote: $('#rates-note'),
+    startDate: $('#goal-start-date'),
+    targetDate: $('#goal-target-date'),
+    forecast: $('#forecast'),
     routeMode: $('#route-mode'),
     distUnit: $('#dist-unit'),
     distance: $('#distance-display'),
@@ -298,6 +303,7 @@
     const target = Number(state.goal.target);
     const { total: achieved, skipped } = Units.sumInUnit(state.entries, state.goal.unit, rates.rates);
     const fraction = Geo.progressFraction(achieved, target);
+    const forecast = computeForecast(target);
 
     renderRatesNote();
 
@@ -325,7 +331,9 @@
       layers.me.bindPopup(
         `<strong>${escapeHtml(state.goal.title || 'Your goal')}</strong><br>` +
           `${escapeHtml(fmtGoal(achieved))} of ${escapeHtml(fmtGoal(target || 0))} (${fmtNum(fraction * 100, 0)}%)<br>` +
-          `${fmtNum(travelled)} ${unitName} travelled, ${fmtNum(totalDist - travelled)} to go`
+          `${fmtNum(travelled)} ${unitName} travelled, ${fmtNum(totalDist - travelled)} to go` +
+          (forecast.status === 'estimate' ? `<br>📅 Est. finish: ${escapeHtml(formatLongDate(forecast.finishDate))}` : '') +
+          (forecast.status === 'reached' ? `<br>🏁 Reached on ${escapeHtml(formatLongDate(forecast.reachedDate))}` : '')
       );
       updateNearby(pos.point);
     } else {
@@ -337,7 +345,104 @@
     }
 
     renderSummary({ achieved, target, fraction, totalDist, unitName, skipped, hasRoute: !!path });
+    renderForecast(forecast);
     renderEntries();
+  }
+
+  // ------------------------------------------------------------- forecast ---
+
+  /** Estimate the finish date from the average rate of progress to date. */
+  function computeForecast(target) {
+    const goalUnit = state.goal.unit;
+    const list = [];
+    for (const e of state.entries) {
+      const v = Units.convert(Number(e.amount) || 0, e.unit || goalUnit, goalUnit, rates.rates);
+      if (v !== null) list.push({ date: e.date, value: v });
+    }
+    return Forecast.estimateFinish(list, target, {
+      startDate: state.goal.startDate,
+      targetDate: state.goal.targetDate,
+    });
+  }
+
+  function renderForecast(f) {
+    const box = el.forecast;
+    box.textContent = '';
+    box.className = 'forecast';
+    box.hidden = f.status === 'no-target';
+    if (box.hidden) return;
+
+    const line = (text, cls) => {
+      const d = document.createElement('div');
+      if (cls) d.className = cls;
+      d.textContent = text;
+      box.appendChild(d);
+      return d;
+    };
+    const perWeek = (ratePerDay) => `${fmtGoal(ratePerDay * 7)} a week`;
+    const fromTo = (f) =>
+      f.basisFrom === f.basisTo ? '' : ` from ${formatDate(f.basisFrom)} to ${formatDate(f.basisTo)}`;
+
+    switch (f.status) {
+      case 'no-data':
+        line('📅 Log your first progress to get an estimated finish date.');
+        break;
+      case 'need-more':
+        line(
+          state.goal.startDate
+            ? '📅 Log progress on another day to get an estimated finish date.'
+            : '📅 Log progress on another day, or set a start date, to get an estimated finish date.'
+        );
+        break;
+      case 'no-progress':
+        line(`📅 No estimated finish date yet: overall progress${fromTo(f)} is flat or going the wrong way.`);
+        break;
+      case 'too-slow':
+        line(`📅 At your current average of ${perWeek(f.ratePerDay)}, this would take over 100 years.`);
+        break;
+      case 'estimate': {
+        const daysAway = Forecast.daysBetween(today(), f.finishDate);
+        const when = daysAway < 0 ? 'this date has passed – log your latest progress to update it' : Forecast.describeIn(daysAway);
+        line(`📅 Estimated finish: ${formatLongDate(f.finishDate)} (${when})`, 'eta');
+        line(`Based on your average of ${perWeek(f.ratePerDay)}${fromTo(f)}. This updates each time you log progress.`, 'basis');
+        break;
+      }
+      case 'reached': {
+        box.classList.add('done');
+        const took = state.goal.startDate ? Forecast.daysBetween(state.goal.startDate, f.reachedDate) : null;
+        line(
+          `🏁 Goal reached on ${formatLongDate(f.reachedDate)}` + (took > 0 ? ` – it took ${Forecast.describeSpan(took)}.` : '.'),
+          'eta'
+        );
+        if (f.targetDate || state.goal.targetDate) {
+          const diff = Forecast.daysBetween(state.goal.targetDate, f.reachedDate);
+          if (diff !== null) {
+            if (diff <= 0) line(`✅ ${diff === 0 ? 'Right on' : Forecast.describeSpan(diff) + ' ahead of'} your finish-by date.`, 'ahead');
+            else line(`Finished ${Forecast.describeSpan(diff)} after your finish-by date – but you made it!`, 'basis');
+          }
+        }
+        return;
+      }
+    }
+
+    // Finish-by date comparison.
+    if (!f.targetDate) return;
+    const by = formatLongDate(f.targetDate);
+    if (f.status === 'estimate') {
+      if (f.daysLate <= 0) {
+        line(f.daysLate === 0 ? `✅ Right on schedule for ${by}.` : `✅ On track – about ${Forecast.describeSpan(f.daysLate)} ahead of ${by}.`, 'ahead');
+        return;
+      }
+      line(`⚠️ About ${Forecast.describeSpan(f.daysLate)} behind your finish-by date of ${by}.`, 'behind');
+    }
+    if (f.requiredRatePerDay === null) line(`Your finish-by date of ${by} has passed.`, 'basis');
+    else if (f.requiredRatePerDay !== undefined && f.status !== 'no-data')
+      line(`To finish by ${by} you need ${perWeek(f.requiredRatePerDay)}.`, 'basis');
+  }
+
+  function formatLongDate(iso) {
+    const d = new Date(iso + 'T00:00:00');
+    return isNaN(d) ? iso : d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   }
 
   /** Format an amount in the goal's unit, e.g. "£3.52" or "10 st 4 lb". */
@@ -622,6 +727,15 @@
   function bindGoalInputs() {
     fillUnitSelect(el.unit, Object.keys(Units.UNITS), state.goal.unit);
     el.title.value = state.goal.title || '';
+    el.startDate.value = state.goal.startDate || '';
+    el.targetDate.value = state.goal.targetDate || '';
+    for (const [input, key] of [[el.startDate, 'startDate'], [el.targetDate, 'targetDate']]) {
+      input.addEventListener('change', () => {
+        state.goal[key] = input.value;
+        save();
+        renderRouteAndProgress();
+      });
+    }
     el.target.value = state.goal.targetText || '';
     el.customUnit.value = state.goal.customUnit || '';
     el.routeMode.value = state.routeMode;
