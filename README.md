@@ -36,6 +36,12 @@ As they record losses, the app updates their current position on the map.
   - **Finish-by date (optional)**: the app says whether you're ahead or behind, and the weekly rate you need to finish by then.
   - **Goal reached**: the app shows the date you reached it and how long it took.
   - **No estimate yet**: the app explains why, for example when you need entries on more than one day or progress is flat.
+- **Traveller icon**: the marker changes with the journey. You can also pick an icon yourself (runner, cyclist, car, bird or plane):
+  - **By road**: 🏃 a runner for routes up to 50 miles, 🚗 a car for longer ones.
+  - **As the crow flies**: 🐦 a bird for routes up to 50 miles, ✈️ a plane for longer ones.
+
+  The icon turns to face the direction of travel. The plane rotates to the route's heading, and the runner, cyclist and car mirror when heading west.
+  Icons are drawn as SVG rather than emoji, so they look and point the same on every device.
 - **Map position**: the 🏃 marker moves along the route in proportion to your progress. The part of the route you've covered is drawn solid. The panel shows the distance travelled and remaining, and the place you're currently near.
 - Everything is saved in your browser's `localStorage`. There is no account or server.
 

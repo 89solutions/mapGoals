@@ -23,6 +23,7 @@
     routePath: null, // [[lat, lng], ...] for the current start/end/mode
     routeKey: null, // identifies which start/end/mode routePath belongs to
     distUnit: 'mi',
+    traveller: 'auto', // 'auto' | 'runner' | 'cyclist' | 'car' | 'bird' | 'plane'
     entries: [], // { id, date, amount, unit, note } – amount is in the entry's own unit
   });
 
@@ -108,6 +109,8 @@
     entryUnit: $('#entry-unit'),
     entryError: $('#entry-error'),
     ratesNote: $('#rates-note'),
+    traveller: $('#traveller'),
+    travellerHint: $('#traveller-hint'),
     startDate: $('#goal-start-date'),
     targetDate: $('#goal-target-date'),
     forecast: $('#forecast'),
@@ -138,7 +141,6 @@
   const icons = {
     start: L.divIcon({ className: '', html: '<div class="pin pin-start"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }),
     end: L.divIcon({ className: '', html: '<div class="pin pin-end"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }),
-    me: L.divIcon({ className: '', html: '<div class="me">🏃</div>', iconSize: [36, 36], iconAnchor: [18, 18] }),
   };
 
   const layers = {
@@ -149,6 +151,61 @@
     me: null,
   };
 
+  // Map marker icons are inline SVG rather than emoji, because emoji face different ways on
+  // different devices (e.g. the runner faces left on Apple but right on Android), which would
+  // make the direction-of-travel turning unreliable.
+  // `faces`: which way the drawing points. 'right' icons are mirrored when heading west;
+  // 'up' icons are rotated to the compass heading; 'none' icons are symmetrical.
+  // Runner, cyclist and plane paths are adapted from Google Material Icons (Apache License 2.0).
+  const TRAVELLERS = {
+    runner: {
+      name: 'runner', emoji: '🏃', faces: 'right',
+      svg: '<path d="M13.49 5.48c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm-3.6 13.9l1-4.4 2.1 2v6h2v-7.5l-2.1-2 .6-3c1.3 1.5 3.3 2.5 5.5 2.5v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1l-5.2 2.2v4.7h2v-3.4l1.8-.7-1.6 8.1-4.9-1-.4 2 7 1.4z"/>',
+    },
+    cyclist: {
+      name: 'cyclist', emoji: '🚴', faces: 'right',
+      svg: '<path d="M15.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM5 12c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5zm5.8-10l2.4-2.4.8.8c1.3 1.3 3 2.1 5.1 2.1V9c-1.5 0-2.7-.6-3.6-1.5l-1.9-1.9c-.5-.4-1-.6-1.6-.6s-1.1.2-1.4.6L7.8 8.4c-.4.4-.6.9-.6 1.4 0 .6.2 1.1.6 1.4L11 14v5h2v-6.2l-2.2-2.3zM19 12c-2.8 0-5 2.2-5 5s2.2 5 5 5 5-2.2 5-5-2.2-5-5-5zm0 8.5c-1.9 0-3.5-1.6-3.5-3.5s1.6-3.5 3.5-3.5 3.5 1.6 3.5 3.5-1.6 3.5-3.5 3.5z"/>',
+    },
+    car: {
+      name: 'car', emoji: '🚗', faces: 'right',
+      svg:
+        '<path d="M1.5 16.2v-3.6c0-.6.4-1.1 1-1.2l3.6-.8 2.7-3.5c.4-.5 1-.8 1.6-.8h4.4c.6 0 1.2.3 1.6.8l2.9 3.4 2.8.6c.5.1.9.6.9 1.1v4c0 .5-.4.8-.8.8h-1.5a2.6 2.6 0 0 0-5.1 0H9.1a2.6 2.6 0 0 0-5.1 0H2.3c-.4 0-.8-.3-.8-.8z"/>' +
+        '<path fill="#fff" d="M7.6 11.2l2.1-2.8c.2-.2.4-.3.6-.3h2.3v3.1zM14 8.1h1.1c.3 0 .5.1.6.3l2.3 2.8H14z"/>' +
+        '<circle cx="6.55" cy="17" r="2"/><circle cx="16.55" cy="17" r="2"/>',
+    },
+    bird: {
+      name: 'bird', emoji: '🐦', faces: 'none', viewBox: '1 5 22 14',
+      svg: '<path d="M1 8.5c3.6-.4 6.9 1.2 9 4.3.5-.9 1.2-1.4 2-1.4s1.5.5 2 1.4c2.1-3.1 5.4-4.7 9-4.3-3.7 1.2-6.4 3.9-7.6 7.6-.9-.9-2.1-1.4-3.4-1.4s-2.5.5-3.4 1.4C7.4 12.4 4.7 9.7 1 8.5z"/>',
+    },
+    plane: {
+      name: 'plane', emoji: '✈️', faces: 'up',
+      svg: '<path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>',
+    },
+  };
+
+  /** Marker icon for a traveller, turned to face its direction of travel (compass heading). */
+  function travellerIcon(kind, heading) {
+    const t = TRAVELLERS[kind] || TRAVELLERS.runner;
+    let transform = 'none';
+    if (heading !== null && heading !== undefined) {
+      if (t.faces === 'up') transform = `rotate(${Math.round(heading)}deg)`;
+      else if (t.faces === 'right' && heading > 180 && heading < 360) transform = 'scaleX(-1)'; // heading west
+    }
+    return {
+      key: `${kind}|${transform}`,
+      icon: L.divIcon({
+        className: '',
+        html:
+          `<div class="me me-${kind}" role="img" aria-label="${t.name}">` +
+          `<svg viewBox="${t.viewBox || '0 0 24 24'}" width="26" height="26" style="transform:${transform}" aria-hidden="true">${t.svg}</svg></div>`,
+        iconSize: [42, 42],
+        iconAnchor: [21, 21],
+        popupAnchor: [0, -18],
+      }),
+    };
+  }
+
+  let meIconKey = null;
   let pickMode = null; // 'start' | 'end' | null
 
   map.on('click', (ev) => {
@@ -306,6 +363,7 @@
     const forecast = computeForecast(target);
 
     renderRatesNote();
+    renderTravellerHint(path);
 
     // Route line
     layers.route.setLatLngs(path || []);
@@ -325,7 +383,14 @@
     if (path) {
       const pos = Geo.pointAlongPath(path, fraction);
       layers.travelled.setLatLngs(pos.travelled);
-      if (!layers.me) layers.me = L.marker(pos.point, { icon: icons.me, zIndexOffset: 1000, keyboard: false }).addTo(map);
+      const kind = Geo.pickTraveller(state.routeMode, Geo.pathLengthKm(path), state.traveller);
+      const { key, icon } = travellerIcon(kind, pos.heading);
+      if (!layers.me) {
+        layers.me = L.marker(pos.point, { icon, zIndexOffset: 1000, keyboard: false }).addTo(map);
+      } else if (key !== meIconKey) {
+        layers.me.setIcon(icon);
+      }
+      meIconKey = key;
       layers.me.setLatLng(pos.point);
       const travelled = totalDist * fraction;
       layers.me.bindPopup(
@@ -341,6 +406,7 @@
       if (layers.me) {
         map.removeLayer(layers.me);
         layers.me = null;
+        meIconKey = null;
       }
     }
 
@@ -443,6 +509,21 @@
   function formatLongDate(iso) {
     const d = new Date(iso + 'T00:00:00');
     return isNaN(d) ? iso : d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  function renderTravellerHint(path) {
+    if (state.traveller !== 'auto') {
+      el.travellerHint.textContent = '';
+      el.travellerHint.hidden = true;
+      return;
+    }
+    el.travellerHint.hidden = false;
+    const kind = path ? Geo.pickTraveller(state.routeMode, Geo.pathLengthKm(path), 'auto') : null;
+    const now = kind ? ` Currently: ${TRAVELLERS[kind].emoji} ${TRAVELLERS[kind].name}.` : '';
+    el.travellerHint.textContent =
+      state.routeMode === 'road'
+        ? `By road you're a 🏃 runner up to 50 miles, then a 🚗 car.${now}`
+        : `As the crow flies you're a 🐦 bird up to 50 miles, then a ✈️ plane.${now}`;
   }
 
   /** Format an amount in the goal's unit, e.g. "£3.52" or "10 st 4 lb". */
@@ -740,6 +821,12 @@
     el.customUnit.value = state.goal.customUnit || '';
     el.routeMode.value = state.routeMode;
     el.distUnit.value = state.distUnit;
+    el.traveller.value = state.traveller;
+    el.traveller.addEventListener('change', () => {
+      state.traveller = el.traveller.value;
+      save();
+      renderRouteAndProgress();
+    });
     el.entryDate.value = today();
     syncUnitControls();
 

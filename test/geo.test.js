@@ -50,3 +50,33 @@ test('antimeridian crossing keeps longitudes continuous', () => {
   const path = Geo.greatCirclePoints([35.68, 139.69], [37.77, -122.42]); // Tokyo → San Francisco
   for (let i = 1; i < path.length; i++) assert.ok(Math.abs(path[i][1] - path[i - 1][1]) < 180);
 });
+
+test('bearings', () => {
+  assert.ok(Math.abs(Geo.bearingDeg([0, 0], [1, 0]) - 0) < 1e-9); // north
+  assert.ok(Math.abs(Geo.bearingDeg([0, 0], [0, 1]) - 90) < 1e-9); // east
+  assert.ok(Math.abs(Geo.bearingDeg([0, 0], [-1, 0]) - 180) < 1e-9); // south
+  assert.ok(Math.abs(Geo.bearingDeg([0, 0], [0, -1]) - 270) < 1e-9); // west
+  // London → New York heads west-north-west at the start of the great circle
+  const b = Geo.bearingDeg(LONDON, NEW_YORK);
+  assert.ok(b > 280 && b < 300, `got ${b}`);
+});
+
+test('pointAlongPath reports the heading of the current leg', () => {
+  const path = [[0, 0], [0, 1], [1, 1]]; // east, then north
+  assert.ok(Math.abs(Geo.pointAlongPath(path, 0.25).heading - 90) < 1e-6);
+  assert.ok(Math.abs(Geo.pointAlongPath(path, 0.75).heading - 0) < 1e-6);
+  assert.ok(Math.abs(Geo.pointAlongPath(path, 0).heading - 90) < 1e-6);
+  assert.ok(Math.abs(Geo.pointAlongPath(path, 1).heading - 0) < 1e-6);
+  assert.equal(Geo.pointAlongPath([[5, 5], [5, 5]], 0.5).heading, null);
+});
+
+test('traveller icon depends on route type and distance (50-mile threshold)', () => {
+  const mi = (n) => n * Geo.KM_PER_MILE;
+  assert.equal(Geo.pickTraveller('road', mi(20), 'auto'), 'runner');
+  assert.equal(Geo.pickTraveller('road', mi(50), 'auto'), 'runner');
+  assert.equal(Geo.pickTraveller('road', mi(51), 'auto'), 'car');
+  assert.equal(Geo.pickTraveller('straight', mi(20), 'auto'), 'bird');
+  assert.equal(Geo.pickTraveller('straight', mi(500), 'auto'), 'plane');
+  assert.equal(Geo.pickTraveller('straight', mi(500)), 'plane');
+  assert.equal(Geo.pickTraveller('road', mi(500), 'cyclist'), 'cyclist');
+});
