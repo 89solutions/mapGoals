@@ -211,9 +211,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
 .pin-end { background: var(--end); }
 
 .me {
-  font-size: 26px;
-  line-height: 36px;
-  width: 36px; height: 36px;
+  width: 42px; height: 42px;
   text-align: center;
   border-radius: 50%;
   background: #fff;
@@ -263,3 +261,13 @@ code {
 .forecast .ahead { color: var(--start); font-weight: 600; }
 .forecast .behind { color: #b26a00; font-weight: 600; }
 .forecast.done { background: #ecf8f0; border-color: #b6e3c6; }
+
+/* Traveller marker: the SVG is turned to face the direction of travel */
+.me {
+  display: grid;
+  place-items: center;
+}
+.me svg {
+  fill: var(--travel);
+  transition: transform 0.3s ease;
+}

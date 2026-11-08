@@ -71,7 +71,7 @@
    */
   function pointAlongPath(path, fraction) {
     if (!path || path.length === 0) return null;
-    if (path.length === 1) return { point: path[0].slice(), travelled: [path[0].slice()] };
+    if (path.length === 1) return { point: path[0].slice(), travelled: [path[0].slice()], heading: null };
     const f = clamp(fraction, 0, 1);
     const target = pathLengthKm(path) * f;
     let walked = 0;
@@ -85,13 +85,47 @@
           path[i - 1][1] + (path[i][1] - path[i - 1][1]) * t,
         ];
         travelled.push(p);
-        return { point: p, travelled };
+        return { point: p, travelled, heading: segmentHeading(path, i) };
       }
       walked += seg;
       travelled.push(path[i].slice());
     }
     const last = path[path.length - 1].slice();
-    return { point: last, travelled };
+    return { point: last, travelled, heading: segmentHeading(path, path.length - 1) };
+  }
+
+  /** Bearing of the segment ending at index i, skipping zero-length segments. */
+  function segmentHeading(path, i) {
+    for (let j = Math.max(1, i); j < path.length; j++) {
+      if (haversineKm(path[j - 1], path[j]) > 0) return bearingDeg(path[j - 1], path[j]);
+    }
+    for (let j = Math.min(i, path.length - 1); j >= 1; j--) {
+      if (haversineKm(path[j - 1], path[j]) > 0) return bearingDeg(path[j - 1], path[j]);
+    }
+    return null;
+  }
+
+  /** Initial compass bearing from a to b in degrees (0 = north, 90 = east). */
+  function bearingDeg(a, b) {
+    const lat1 = toRad(a[0]), lat2 = toRad(b[0]);
+    const dLng = toRad(b[1] - a[1]);
+    const y = Math.sin(dLng) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+    return (toDeg(Math.atan2(y, x)) + 360) % 360;
+  }
+
+  const TRAVELLER_THRESHOLD_KM = 50 * KM_PER_MILE;
+
+  /**
+   * Which icon to show travelling the route. `choice` is the user's pick, or 'auto':
+   *   by road:            up to 50 miles → runner, longer → car
+   *   as the crow flies:  up to 50 miles → bird,   longer → plane
+   */
+  function pickTraveller(routeMode, totalKm, choice) {
+    if (choice && choice !== 'auto') return choice;
+    const long = totalKm > TRAVELLER_THRESHOLD_KM;
+    if (routeMode === 'road') return long ? 'car' : 'runner';
+    return long ? 'plane' : 'bird';
   }
 
   /** Sum of logged progress entries. */
@@ -120,6 +154,9 @@
     greatCirclePoints,
     pathLengthKm,
     pointAlongPath,
+    bearingDeg,
+    pickTraveller,
+    TRAVELLER_THRESHOLD_KM,
     totalProgress,
     progressFraction,
     kmTo,
