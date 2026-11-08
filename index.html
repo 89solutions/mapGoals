@@ -22,18 +22,17 @@
           <input id="goal-title" type="text" placeholder="e.g. Lose 30lbs in weight" />
         </label>
         <div class="row">
-          <label>Target amount
-            <input id="goal-target" type="number" min="0" step="any" placeholder="30" />
-          </label>
           <label>Unit
-            <input id="goal-unit" type="text" placeholder="lbs" list="unit-suggestions" />
-            <datalist id="unit-suggestions">
-              <option value="lbs"></option><option value="kg"></option><option value="miles"></option>
-              <option value="km"></option><option value="£"></option><option value="$"></option>
-              <option value="pages"></option><option value="hours"></option>
-            </datalist>
+            <select id="goal-unit"></select>
+          </label>
+          <label>Target amount
+            <input id="goal-target" type="text" inputmode="decimal" autocomplete="off" placeholder="e.g. 30" />
           </label>
         </div>
+        <label id="custom-unit-wrap" hidden>Your unit
+          <input id="goal-custom-unit" type="text" placeholder="e.g. pages, books, push-ups" />
+        </label>
+        <div class="field-error" id="target-error" hidden></div>
       </section>
 
       <!-- 2. Route -->
@@ -85,10 +84,14 @@
       <section class="card" id="progress-card">
         <h2><span class="step">3</span> Log progress</h2>
         <form id="entry-form" class="entry-form">
-          <label><span>Amount (<span class="unit-label">lbs</span>)</span>
-            <input id="entry-amount" type="number" step="any" required placeholder="e.g. 2.5" />
+          <label><span>Amount</span>
+            <input id="entry-amount" type="text" inputmode="decimal" autocomplete="off" required placeholder="e.g. 2.5" />
           </label>
-          <label>Date
+          <label>Unit
+            <select id="entry-unit"></select>
+          </label>
+          <div class="field-error wide" id="entry-error" hidden></div>
+          <label class="wide">Date
             <input id="entry-date" type="date" required />
           </label>
           <label class="wide">Note (optional)
@@ -96,7 +99,8 @@
           </label>
           <button type="submit" class="btn primary wide">Add progress</button>
         </form>
-        <p class="hint">Use a negative number for a set-back (e.g. −1 if you put a pound back on).</p>
+        <p class="hint">Type amounts how you like, e.g. <code>3.52</code>, <code>£3.52</code>, <code>52p</code>, <code>2st 5lb</code> or <code>1.2kg</code>. Use a negative number for a set-back (e.g. −1 if you put a pound back on).</p>
+        <p class="hint" id="rates-note" hidden></p>
 
         <div class="summary" id="summary">
           <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
@@ -119,6 +123,7 @@
 
   <script src="vendor/leaflet/leaflet.js"></script>
   <script src="js/geo.js"></script>
+  <script src="js/units.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
