@@ -1,0 +1,10 @@
+{
+  "name": "mapgoals",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Visualise progress towards a personal goal as a journey on a map.",
+  "scripts": {
+    "start": "npx --yes http-server -c-1 -p 8080 .",
+    "test": "node --test test/*.test.js"
+  }
+}

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MapGoals – see your progress as a journey</title>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="panel">
+      <header class="brand">
+        <h1>🗺️ MapGoals</h1>
+        <p>Turn a personal goal into a journey on the map.</p>
+      </header>
+
+      <!-- 1. Goal -->
+      <section class="card" id="goal-card">
+        <h2><span class="step">1</span> Your goal</h2>
+        <label>Goal description
+          <input id="goal-title" type="text" placeholder="e.g. Lose 30lbs in weight" />
+        </label>
+        <div class="row">
+          <label>Target amount
+            <input id="goal-target" type="number" min="0" step="any" placeholder="30" />
+          </label>
+          <label>Unit
+            <input id="goal-unit" type="text" placeholder="lbs" list="unit-suggestions" />
+            <datalist id="unit-suggestions">
+              <option value="lbs"></option><option value="kg"></option><option value="miles"></option>
+              <option value="km"></option><option value="£"></option><option value="$"></option>
+              <option value="pages"></option><option value="hours"></option>
+            </datalist>
+          </label>
+        </div>
+      </section>
+
+      <!-- 2. Route -->
+      <section class="card" id="route-card">
+        <h2><span class="step">2</span> Your journey</h2>
+        <p class="hint">Search for a place, or click <em>Pick on map</em> and then click the map. You can also drag the pins.</p>
+
+        <div class="point-picker" data-which="start">
+          <div class="point-label"><span class="dot dot-start"></span> Start</div>
+          <form class="search-form" data-which="start">
+            <input type="search" placeholder="e.g. London" aria-label="Search start location" />
+            <button type="submit" class="btn small">Search</button>
+          </form>
+          <button type="button" class="btn small ghost pick-btn" data-which="start">📍 Pick on map</button>
+          <ul class="search-results" data-which="start"></ul>
+          <div class="point-value" id="start-value">Not set</div>
+        </div>
+
+        <div class="point-picker" data-which="end">
+          <div class="point-label"><span class="dot dot-end"></span> Destination</div>
+          <form class="search-form" data-which="end">
+            <input type="search" placeholder="e.g. Las Vegas" aria-label="Search destination" />
+            <button type="submit" class="btn small">Search</button>
+          </form>
+          <button type="button" class="btn small ghost pick-btn" data-which="end">📍 Pick on map</button>
+          <ul class="search-results" data-which="end"></ul>
+          <div class="point-value" id="end-value">Not set</div>
+        </div>
+
+        <div class="row">
+          <label>Route
+            <select id="route-mode">
+              <option value="straight">As the crow flies</option>
+              <option value="road">By road</option>
+            </select>
+          </label>
+          <label>Distance in
+            <select id="dist-unit">
+              <option value="mi">miles</option>
+              <option value="km">kilometres</option>
+            </select>
+          </label>
+        </div>
+        <div class="distance" id="distance-display">Distance: –</div>
+        <div class="notice" id="route-notice" hidden></div>
+      </section>
+
+      <!-- 3. Progress -->
+      <section class="card" id="progress-card">
+        <h2><span class="step">3</span> Log progress</h2>
+        <form id="entry-form" class="entry-form">
+          <label><span>Amount (<span class="unit-label">lbs</span>)</span>
+            <input id="entry-amount" type="number" step="any" required placeholder="e.g. 2.5" />
+          </label>
+          <label>Date
+            <input id="entry-date" type="date" required />
+          </label>
+          <label class="wide">Note (optional)
+            <input id="entry-note" type="text" placeholder="e.g. Great week!" />
+          </label>
+          <button type="submit" class="btn primary wide">Add progress</button>
+        </form>
+        <p class="hint">Use a negative number for a set-back (e.g. −1 if you put a pound back on).</p>
+
+        <div class="summary" id="summary">
+          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+          <div class="summary-text" id="summary-text">Set a goal, a route and log some progress.</div>
+        </div>
+
+        <ul class="entries" id="entries"></ul>
+      </section>
+
+      <footer class="panel-footer">
+        <button type="button" class="btn small ghost danger" id="reset-btn">Reset everything</button>
+      </footer>
+    </aside>
+
+    <main class="map-wrap">
+      <div id="map"></div>
+      <div class="map-banner" id="pick-banner" hidden></div>
+    </main>
+  </div>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="js/geo.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
