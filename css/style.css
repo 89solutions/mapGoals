@@ -12,6 +12,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html, body {
   margin: 0;
@@ -231,3 +232,18 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1
   .map-wrap { grid-row: 1; height: 55vh; }
   .panel { grid-row: 2; border-right: none; overflow: visible; }
 }
+
+/* Units & validation */
+.field-error {
+  color: var(--end);
+  font-size: 0.8rem;
+  margin: -4px 0 10px;
+}
+code {
+  background: #eef2f7;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 0.8rem;
+}
+.entries .conv { color: var(--muted); font-weight: 400; font-size: 0.78rem; display: block; }
+.entries li.incompatible { opacity: 0.55; }

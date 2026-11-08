@@ -3,20 +3,25 @@
   'use strict';
 
   const Geo = window.MapGoalsGeo;
+  const Units = window.MapGoalsUnits;
   const STORAGE_KEY = 'mapgoals.v1';
+  const RATES_KEY = 'mapgoals.rates';
+  const RATES_MAX_AGE_MS = 12 * 60 * 60 * 1000;
   const NOMINATIM = 'https://nominatim.openstreetmap.org';
   const OSRM = 'https://router.project-osrm.org/route/v1/driving';
+  const RATES_URL = 'https://api.frankfurter.app/latest?from=EUR';
 
   // ---------------------------------------------------------------- state ---
   const defaultState = () => ({
-    goal: { title: '', target: null, unit: 'lbs' },
+    // target is a number expressed in `unit`; targetText is what the user typed.
+    goal: { title: '', target: null, targetText: '', unit: 'lb', customUnit: '' },
     start: null, // { lat, lng, label }
     end: null,
     routeMode: 'straight', // 'straight' | 'road'
     routePath: null, // [[lat, lng], ...] for the current start/end/mode
     routeKey: null, // identifies which start/end/mode routePath belongs to
     distUnit: 'mi',
-    entries: [], // { id, date, amount, note }
+    entries: [], // { id, date, amount, unit, note } – amount is in the entry's own unit
   });
 
   let state = load();
@@ -24,11 +29,61 @@
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return Object.assign(defaultState(), JSON.parse(raw));
+      if (raw) return migrate(Object.assign(defaultState(), JSON.parse(raw)));
     } catch (e) {
       console.warn('Could not load saved data', e);
     }
     return defaultState();
+  }
+
+  /** Upgrade data saved before units were structured (free-text unit, unit-less entries). */
+  function migrate(s) {
+    s.goal = Object.assign(defaultState().goal, s.goal);
+    if (!Units.UNITS[s.goal.unit]) {
+      const id = Units.unitIdFromText(s.goal.unit);
+      if (id) s.goal.unit = id;
+      else {
+        s.goal.customUnit = s.goal.customUnit || s.goal.unit || '';
+        s.goal.unit = 'custom';
+      }
+    }
+    if (!s.goal.targetText && s.goal.target != null) s.goal.targetText = String(s.goal.target);
+    s.entries = (s.entries || []).map((e) => (e.unit ? e : Object.assign({}, e, { unit: s.goal.unit })));
+    return s;
+  }
+
+  // ---------------------------------------------------------------- rates ---
+  let rates = { rates: Units.FALLBACK_RATES, date: null, live: false };
+  try {
+    const cached = JSON.parse(localStorage.getItem(RATES_KEY) || 'null');
+    if (cached && cached.rates) rates = cached;
+  } catch (e) {
+    /* ignore */
+  }
+
+  function usesCurrency() {
+    return (
+      Units.categoryOf(state.goal.unit) === 'currency' ||
+      state.entries.some((e) => Units.categoryOf(e.unit) === 'currency')
+    );
+  }
+
+  /** Fetch live exchange rates (ECB, via Frankfurter) when money is involved; cache for 12h. */
+  async function ensureRates() {
+    if (!usesCurrency()) return;
+    if (rates.live && Date.now() - (rates.fetchedAt || 0) < RATES_MAX_AGE_MS) return;
+    try {
+      const res = await fetch(RATES_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const r = Object.assign({ EUR: 1 }, data.rates);
+      const merged = Object.assign({}, Units.FALLBACK_RATES, r);
+      rates = { rates: merged, date: data.date, live: true, fetchedAt: Date.now() };
+      localStorage.setItem(RATES_KEY, JSON.stringify(rates));
+      renderRouteAndProgress();
+    } catch (e) {
+      console.warn('Could not fetch exchange rates; using cached/approximate rates', e);
+    }
   }
 
   function save() {
@@ -45,6 +100,12 @@
     title: $('#goal-title'),
     target: $('#goal-target'),
     unit: $('#goal-unit'),
+    customUnit: $('#goal-custom-unit'),
+    customUnitWrap: $('#custom-unit-wrap'),
+    targetError: $('#target-error'),
+    entryUnit: $('#entry-unit'),
+    entryError: $('#entry-error'),
+    ratesNote: $('#rates-note'),
     routeMode: $('#route-mode'),
     distUnit: $('#dist-unit'),
     distance: $('#distance-display'),
@@ -234,12 +295,11 @@
     const path = state.routePath;
     const unit = state.distUnit;
     const unitName = unit === 'mi' ? 'miles' : 'km';
-    const goalUnit = state.goal.unit || '';
     const target = Number(state.goal.target);
-    const achieved = Geo.totalProgress(state.entries);
+    const { total: achieved, skipped } = Units.sumInUnit(state.entries, state.goal.unit, rates.rates);
     const fraction = Geo.progressFraction(achieved, target);
 
-    document.querySelectorAll('.unit-label').forEach((s) => (s.textContent = goalUnit || 'units'));
+    renderRatesNote();
 
     // Route line
     layers.route.setLatLngs(path || []);
@@ -264,7 +324,7 @@
       const travelled = totalDist * fraction;
       layers.me.bindPopup(
         `<strong>${escapeHtml(state.goal.title || 'Your goal')}</strong><br>` +
-          `${fmtNum(achieved)} of ${fmtNum(target || 0)} ${escapeHtml(goalUnit)} (${fmtNum(fraction * 100, 0)}%)<br>` +
+          `${escapeHtml(fmtGoal(achieved))} of ${escapeHtml(fmtGoal(target || 0))} (${fmtNum(fraction * 100, 0)}%)<br>` +
           `${fmtNum(travelled)} ${unitName} travelled, ${fmtNum(totalDist - travelled)} to go`
       );
       updateNearby(pos.point);
@@ -276,8 +336,24 @@
       }
     }
 
-    renderSummary({ achieved, target, fraction, totalDist, unitName, goalUnit, hasRoute: !!path });
-    renderEntries(goalUnit);
+    renderSummary({ achieved, target, fraction, totalDist, unitName, skipped, hasRoute: !!path });
+    renderEntries();
+  }
+
+  /** Format an amount in the goal's unit, e.g. "£3.52" or "10 st 4 lb". */
+  function fmtGoal(value, opts) {
+    return Units.format(value, state.goal.unit, state.goal.customUnit, opts);
+  }
+
+  function renderRatesNote() {
+    if (!usesCurrency()) {
+      el.ratesNote.hidden = true;
+      return;
+    }
+    el.ratesNote.hidden = false;
+    el.ratesNote.textContent = rates.live
+      ? `💱 Different currencies are converted using European Central Bank rates from ${formatDate(rates.date)}.`
+      : '💱 Live exchange rates are unavailable, so approximate rates are used for converting between currencies.';
   }
 
   let nearbyName = null;
@@ -299,7 +375,7 @@
     }, 600);
   }
 
-  function renderSummary({ achieved, target, fraction, totalDist, unitName, goalUnit, hasRoute }) {
+  function renderSummary({ achieved, target, fraction, totalDist, unitName, skipped, hasRoute }) {
     const parts = [];
     const s = el.summary;
     s.textContent = '';
@@ -310,7 +386,7 @@
     }
 
     const line1 = document.createElement('div');
-    line1.innerHTML = `<strong>${fmtNum(achieved)}</strong> of <strong>${fmtNum(target)}</strong> ${escapeHtml(goalUnit)} &mdash; <strong>${fmtNum(fraction * 100, 0)}%</strong>`;
+    line1.innerHTML = `<strong>${escapeHtml(fmtGoal(achieved))}</strong> of <strong>${escapeHtml(fmtGoal(target))}</strong> &mdash; <strong>${fmtNum(fraction * 100, 0)}%</strong>`;
     parts.push(line1);
 
     if (hasRoute) {
@@ -336,22 +412,44 @@
       parts.push(done);
     } else if (achieved > 0) {
       const left = document.createElement('div');
-      left.textContent = `${fmtNum(target - achieved)} ${goalUnit} left to go. Keep it up!`;
+      left.textContent = `${fmtGoal(target - achieved)} left to go. Keep it up!`;
       parts.push(left);
+    }
+
+    if (skipped.length) {
+      const warn = document.createElement('div');
+      warn.className = 'field-error';
+      warn.textContent = `⚠️ ${skipped.length} entr${skipped.length === 1 ? 'y is' : 'ies are'} in a unit that can't be converted to ${Units.getUnit(state.goal.unit).label.replace(/…$/, '')} and ${skipped.length === 1 ? "isn't" : "aren't"} counted.`;
+      parts.push(warn);
     }
 
     parts.forEach((p) => s.appendChild(p));
   }
 
-  function renderEntries(goalUnit) {
+  function renderEntries() {
     el.entries.textContent = '';
+    const goalUnit = state.goal.unit;
+    const custom = state.goal.customUnit;
     const sorted = [...state.entries].sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.id - a.id);
     for (const entry of sorted) {
       const li = document.createElement('li');
       const amt = document.createElement('span');
       const amount = Number(entry.amount);
+      const unit = entry.unit || goalUnit;
       amt.className = 'amt' + (amount < 0 ? ' neg' : '');
-      amt.textContent = `${amount > 0 ? '+' : ''}${fmtNum(amount, 2)} ${goalUnit}`;
+      amt.textContent = Units.format(amount, unit, custom, { signed: true });
+      if (unit !== goalUnit) {
+        const converted = Units.convert(amount, unit, goalUnit, rates.rates);
+        const conv = document.createElement('span');
+        conv.className = 'conv';
+        if (converted === null) {
+          conv.textContent = 'not counted';
+          li.classList.add('incompatible');
+        } else {
+          conv.textContent = `≈ ${fmtGoal(converted, { signed: true })}`;
+        }
+        amt.appendChild(conv);
+      }
       const meta = document.createElement('span');
       meta.className = 'meta';
       meta.textContent = formatDate(entry.date) + (entry.note ? ` · ${entry.note}` : '');
@@ -458,27 +556,109 @@
   });
 
   // ------------------------------------------------------------- controls ---
+  /** Fill a <select> with unit options, grouped by category. */
+  function fillUnitSelect(select, unitIds, selected) {
+    select.textContent = '';
+    for (const cat of Units.CATEGORIES) {
+      const ids = unitIds.filter((id) => Units.categoryOf(id) === cat.id);
+      if (!ids.length) continue;
+      const group = document.createElement('optgroup');
+      group.label = cat.label;
+      for (const id of ids) {
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = id === 'custom' && state.goal.customUnit && select === el.entryUnit
+          ? state.goal.customUnit
+          : Units.UNITS[id].label;
+        group.appendChild(opt);
+      }
+      select.appendChild(group);
+    }
+    select.value = selected;
+  }
+
+  /** Refresh controls that depend on the goal's unit. */
+  function syncUnitControls() {
+    const unit = state.goal.unit;
+    el.customUnitWrap.hidden = unit !== 'custom';
+    const compatible = Units.compatibleUnits(unit);
+    const keep = compatible.includes(el.entryUnit.value) ? el.entryUnit.value : unit;
+    fillUnitSelect(el.entryUnit, compatible, keep);
+    el.entryUnit.disabled = compatible.length < 2;
+    el.entryAmount.placeholder = Units.categoryOf(unit) === 'currency' ? 'e.g. 3.52' : 'e.g. 2.5';
+    el.target.placeholder = Units.categoryOf(unit) === 'currency' ? 'e.g. 500' : 'e.g. 30';
+  }
+
+  function showError(node, msg) {
+    node.textContent = msg || '';
+    node.hidden = !msg;
+  }
+
+  /** Parse the target box; it may be typed in another compatible unit ("2st" for a lbs goal). */
+  function applyTarget() {
+    const text = el.target.value.trim();
+    state.goal.targetText = text;
+    if (!text) {
+      state.goal.target = null;
+      showError(el.targetError, '');
+    } else {
+      const r = Units.parseAmount(text, state.goal.unit, state.goal.customUnit);
+      const v = r.error ? null : Units.convert(r.value, r.unit, state.goal.unit, rates.rates);
+      if (r.error || v === null) {
+        state.goal.target = null;
+        showError(el.targetError, r.error || `That unit can't be converted to ${Units.getUnit(state.goal.unit).label}.`);
+      } else if (v <= 0) {
+        state.goal.target = null;
+        showError(el.targetError, 'The target needs to be more than zero.');
+      } else {
+        state.goal.target = v;
+        showError(el.targetError, '');
+      }
+    }
+    save();
+    renderRouteAndProgress();
+  }
+
   function bindGoalInputs() {
+    fillUnitSelect(el.unit, Object.keys(Units.UNITS), state.goal.unit);
     el.title.value = state.goal.title || '';
-    el.target.value = state.goal.target ?? '';
-    el.unit.value = state.goal.unit || '';
+    el.target.value = state.goal.targetText || '';
+    el.customUnit.value = state.goal.customUnit || '';
     el.routeMode.value = state.routeMode;
     el.distUnit.value = state.distUnit;
     el.entryDate.value = today();
+    syncUnitControls();
 
     el.title.addEventListener('input', () => {
       state.goal.title = el.title.value;
       save();
       renderRouteAndProgress();
     });
-    el.target.addEventListener('input', () => {
-      const v = parseFloat(el.target.value);
-      state.goal.target = isFinite(v) ? v : null;
-      save();
-      renderRouteAndProgress();
+    el.target.addEventListener('input', applyTarget);
+
+    el.unit.addEventListener('change', () => {
+      const from = state.goal.unit;
+      const to = el.unit.value;
+      // Keep the same target when switching between compatible units (30 lbs → 13.61 kg).
+      if (state.goal.target != null) {
+        const v = Units.convert(state.goal.target, from, to, rates.rates);
+        if (v !== null && from !== to) {
+          const d = Units.getUnit(to).decimals;
+          // Stones are shown as "2 st 2 lb", which parses back exactly.
+          state.goal.targetText = to === 'st' ? Units.format(v, 'st') : String(Math.round(v * 10 ** d) / 10 ** d);
+          el.target.value = state.goal.targetText;
+        }
+      }
+      state.goal.unit = to;
+      el.entryUnit.value = to;
+      syncUnitControls();
+      applyTarget();
+      ensureRates();
     });
-    el.unit.addEventListener('input', () => {
-      state.goal.unit = el.unit.value.trim();
+
+    el.customUnit.addEventListener('input', () => {
+      state.goal.customUnit = el.customUnit.value.trim();
+      syncUnitControls();
       save();
       renderRouteAndProgress();
     });
@@ -493,23 +673,39 @@
       renderRouteAndProgress();
     });
 
+    el.entryAmount.addEventListener('input', () => showError(el.entryError, ''));
     el.entryForm.addEventListener('submit', (e) => {
       e.preventDefault();
-      const amount = parseFloat(el.entryAmount.value);
-      if (!isFinite(amount) || amount === 0) {
+      // A unit typed in the box ("£3.52", "52p", "1.2kg") wins over the dropdown.
+      const r = Units.parseAmount(el.entryAmount.value, el.entryUnit.value, state.goal.customUnit);
+      if (r.error) {
+        showError(el.entryError, r.error);
         el.entryAmount.focus();
         return;
       }
+      if (r.value === 0) {
+        showError(el.entryError, 'Please enter an amount other than zero.');
+        el.entryAmount.focus();
+        return;
+      }
+      if (Units.convert(1, r.unit, state.goal.unit, Units.FALLBACK_RATES) === null) {
+        showError(el.entryError, `${Units.getUnit(r.unit).label} can't be converted to ${Units.getUnit(state.goal.unit).label}.`);
+        el.entryAmount.focus();
+        return;
+      }
+      showError(el.entryError, '');
       state.entries.push({
         id: Date.now(),
         date: el.entryDate.value || today(),
-        amount,
+        amount: r.value,
+        unit: r.unit,
         note: el.entryNote.value.trim(),
       });
       save();
       el.entryAmount.value = '';
       el.entryNote.value = '';
       renderRouteAndProgress();
+      ensureRates();
       if (layers.me) layers.me.openPopup();
     });
 
@@ -530,6 +726,7 @@
   bindGoalInputs();
   renderPoints();
   updateRoute({ fit: true });
+  ensureRates();
 
   // Exposed for debugging / tests.
   window.MapGoalsApp = { getState: () => state, setPoint };
